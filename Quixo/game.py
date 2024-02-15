@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from copy import deepcopy
 from enum import Enum
 import numpy as np
-
+from typing import Tuple
 # Rules on PDF
 
 
@@ -22,7 +22,7 @@ class Player(ABC):
         pass
 
     @abstractmethod
-    def make_move(self, game: 'Game') -> tuple[tuple[int, int], Move]:
+    def make_move(self, game: 'Game') -> Tuple[Tuple[int, int], Move]:
         '''
         The game accepts coordinates of the type (X, Y). X goes from left to right, while Y goes from top to bottom, as in 2D graphics.
         Thus, the coordinates that this method returns shall be in the (X, Y) format.
@@ -99,7 +99,7 @@ class Game(object):
             winner = self.check_winner()
         return winner
 
-    def __move(self, from_pos: tuple[int, int], slide: Move, player_id: int) -> bool:
+    def __move(self, from_pos: Tuple[int, int], slide: Move, player_id: int) -> bool:
         '''Perform a move'''
         if player_id > 2:
             return False
@@ -112,7 +112,7 @@ class Game(object):
                 self._board[(from_pos[1], from_pos[0])] = deepcopy(prev_value)
         return acceptable
 
-    def __take(self, from_pos: tuple[int, int], player_id: int) -> bool:
+    def __take(self, from_pos: Tuple[int, int], player_id: int) -> bool:
         '''Take piece'''
         # acceptable only if in border
         acceptable: bool = (
@@ -130,7 +130,7 @@ class Game(object):
             self._board[from_pos] = player_id
         return acceptable
 
-    def __slide(self, from_pos: tuple[int, int], slide: Move) -> bool:
+    def __slide(self, from_pos: Tuple[int, int], slide: Move) -> bool:
         '''Slide the other pieces'''
         # define the corners
         SIDES = [(0, 0), (0, 4), (4, 0), (4, 4)]
@@ -209,3 +209,14 @@ class Game(object):
                 # move the piece down
                 self._board[(self._board.shape[0] - 1, from_pos[1])] = piece
         return acceptable
+
+class SimulatedGame(Game):
+    def __init__(self, original_game):
+        # Initialize with the current state of the original game
+        super().__init__()
+        self._board = np.copy(original_game.get_board())
+        self.current_player_idx = original_game.get_current_player()
+
+    def simulate_move(self, from_pos: Tuple[int, int], slide: Move, player_id: int) -> bool:
+        # A method to simulate a move without affecting the actual game state
+        return self._Game__move(from_pos, slide, player_id)
