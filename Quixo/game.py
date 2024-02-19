@@ -212,11 +212,9 @@ class Game(object):
 
 class SimulatedGame(Game):
     def __init__(self, original_game):
-        # Initialize with the current state of the original game
         super().__init__()
         self._board = np.copy(original_game.get_board())
         self.current_player_idx = original_game.get_current_player()
 
     def simulate_move(self, from_pos: Tuple[int, int], slide: Move, player_id: int) -> bool:
-        # A method to simulate a move without affecting the actual game state
         return self._Game__move(from_pos, slide, player_id)

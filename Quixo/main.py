@@ -2,6 +2,7 @@ from game import SimulatedGame,Game, Move, Player
 import random
 import numpy as np
 from copy import deepcopy
+
 class RandomPlayer(Player):
     def __init__(self) -> None:
         super().__init__()
@@ -16,20 +17,16 @@ class Individual:
         self.move_sequence = move_sequence or self.generate_random_sequence()
 
     def generate_random_sequence(self):
-        # Generate a random sequence of moves
-        return [
-            (random.randint(0, 4), random.randint(0, 4), random.choice([Move.TOP, Move.BOTTOM, Move.LEFT, Move.RIGHT]))
-            for _ in range(5)]
+        return [(random.randint(0, 4), random.randint(0, 4), random.choice(list(Move))) for _ in range(5)]
 
     def mutate(self, mutation_rate):
-        # Mutate the individual's move sequence based on the mutation rate
         for i in range(len(self.move_sequence)):
             if random.random() < mutation_rate:
-                self.move_sequence[i] = (random.randint(0, 4), random.randint(0, 4), random.choice([Move.TOP, Move.BOTTOM, Move.LEFT, Move.RIGHT]))
-
+                new_pos = (random.randint(0, 4), random.randint(0, 4))
+                new_direction = random.choice(list(Move))
+                self.move_sequence[i] = (new_pos[0], new_pos[1], new_direction)
     @staticmethod
     def crossover(parent1, parent2):
-        # Create offspring with a combination of moves from both parents
         child_move_sequence = []
         for i in range(len(parent1.move_sequence)):
             if random.random() < 0.5:
@@ -37,128 +34,109 @@ class Individual:
             else:
                 child_move_sequence.append(parent2.move_sequence[i])
         return Individual(move_sequence=child_move_sequence)
-
 class ESAgent(Player):
-    def __init__(self, player_id: int, generations: int = 100, population_size: int = 50) -> None:
+    def __init__(self, player_id, generations: int = 200, population_size: int = 100):
         super().__init__()
         self.player_id = player_id
         self.generations = generations
         self.population_size = population_size
+        self.population = [Individual() for _ in range(self.population_size)]
 
-    def make_move(self, game: 'Game') -> tuple[tuple[int, int], Move]:
-        population = [Individual() for _ in range(self.population_size)]
-
+    def make_move(self, game):
         for generation in range(self.generations):
-            # Apply adaptive mutation rate for this generation
-            mutation_rate = self.adaptive_mutation_rate(generation)
-
-            # Mutate the population
-            for individual in population:
+            for individual in self.population:
+                mutation_rate = self.adaptive_mutation_rate(generation)
                 individual.mutate(mutation_rate)
 
-            # Evaluate the population
-            scores = [self.evaluate_move_sequence(ind.move_sequence, game) for ind in population]
-            elite_indices = self.select_elite_indices(scores)
-            best_individual = population[elite_indices[0]]
+            scores = [self.evaluate_move_sequence(ind.move_sequence, game) for ind in self.population]
+            best_index = scores.index(max(scores))
+            best_individual = self.population[best_index]
 
-            # Introduce diversity into the population every few generations
-            if generation % 10 == 0:
-                population = self.introduce_diversity(population)
-
-            # Crossover and selection for the next generation
-            next_generation = []
-            while len(next_generation) < self.population_size:
-                # Randomly select two parents for crossover
-                parent1, parent2 = random.sample(population, 2)
-                # Create offspring
-                offspring = Individual.crossover(parent1, parent2)
-                next_generation.append(offspring)
-
-            # Select the best-performing individuals for the next generation
-            next_generation_scores = [self.evaluate_move_sequence(ind.move_sequence, game) for ind in next_generation]
-            best_indices = self.select_elite_indices(next_generation_scores)
-            population = [next_generation[i] for i in best_indices]
-
-            # Make the move specified by the best individual (if it's the last generation)
-            if generation == self.generations - 1:
+            if generation < self.generations - 1:
+                next_generation = [Individual.crossover(random.choice(self.population), random.choice(self.population)) for _ in range(self.population_size)]
+                self.population = next_generation
+            else:
                 move = best_individual.move_sequence[0]
+                game.print()
                 return move[0:2], move[2]
 
+    def adaptive_mutation_rate(self, generation):
+        return 0.1 - (generation / (2 * self.generations)) * 0.09
+
     def evaluate_move_sequence(self, move_sequence, game):
-        # Simulate the game with the given move sequence and evaluate the final state
         simulated_game = SimulatedGame(game)
-        simulated_game.current_player_idx = self.player_id
-
         for move in move_sequence:
-            from_pos, slide = move[0:2], move[2]
-            simulated_game._Game__move(from_pos, slide, self.player_id)
-
-        # Evaluate the final game state
-        return self.evaluate(simulated_game)
-
-    def evaluate(self, game: 'Game'):
-        player_positions = [(x, y) for x in range(5) for y in range(5) if game.get_board()[x, y] == self.player_id]
-
-        # Check for winning positions horizontally, vertically, and diagonally
-        score = 0
-        # Enhanced evaluation for strategic decision-making
-        for position in player_positions:
-            x, y = position
-            # Weighted scoring for different line types
-            horizontal_score = sum(game.get_board()[x, i] == self.player_id for i in range(5))
-            vertical_score = sum(game.get_board()[i, y] == self.player_id for i in range(5))
-            diagonal_score = sum(game.get_board()[i, i] == self.player_id for i in range(5)) if x == y else 0
-            anti_diagonal_score = sum(
-                game.get_board()[i, 4 - i] == self.player_id for i in range(5)) if x + y == 4 else 0
-
-            # Assign weights to different line types based on strategic value
-            score += (horizontal_score * 2 + vertical_score * 2 + diagonal_score * 3 + anti_diagonal_score * 3)
-
-            # Consider opponent's potential winning positions (defensive strategy)
-            opponent_id = 1 if self.player_id == 0 else 0
-            opponent_score = sum(game.get_board()[x, i] == opponent_id for i in range(5)) * -2
-            score += opponent_score
-
+            from_pos, move_dir = move[0:2], move[2]
+            simulated_game.simulate_move(from_pos, move_dir, self.player_id)
+        score = self.calculate_score(simulated_game)
         return score
 
-    def select_elite_indices(self, scores):
-        # Select the indices of the top-performing individuals
-        return sorted(range(len(scores)), key=lambda x: scores[x], reverse=True)[:min(5, len(scores))]
+    def calculate_score(self, simulated_game):
+        player_score = 0
+        opponent_score = 0
+        board = simulated_game.get_board()
 
-    def introduce_diversity(self, population):
-        # Introduce new random individuals to the population
-        diversity_count = int(self.population_size * 0.1)  # 10% of the population
-        for _ in range(diversity_count):
-            population[random.randint(0, len(population) - 1)] = Individual()
-        return population
+        # Enhanced evaluation logic here, considering strategic positions
+        lines = self.get_all_lines(board)
+        center_control = board[2, 2] == self.player_id
+        player_score += 50 if center_control else 0
 
-    def adaptive_mutation_rate(self, generation):
-        # Adjust the mutation rate based on the generation number
-        initial_rate = 0.1  # 10% mutation rate initially
-        final_rate = 0.01   # 1% mutation rate in the final generation
-        return initial_rate - (initial_rate - final_rate) * (generation / self.generations)
+        for line in lines:
+            if np.all(line == self.player_id):
+                player_score += 100
+            elif np.all(line == 1 - self.player_id):
+                opponent_score += 100
+            else:
+                player_score += np.count_nonzero(line == self.player_id) * 10
+                opponent_score += np.count_nonzero(line == 1 - self.player_id) * 10
 
+        return player_score - opponent_score
+
+    def get_all_lines(self, board):
+        lines = []
+        # Horizontal and vertical
+        for i in range(5):
+            lines.append(board[i, :])  # Horizontal
+            lines.append(board[:, i])  # Vertical
+        # Diagonals
+        lines.append(np.diag(board))
+        lines.append(np.diag(np.fliplr(board)))
+        return lines
+
+    def tournament_selection(self, scores, k=3):
+        tournament = random.sample(list(enumerate(self.population)), k)
+        tournament_winner = max(tournament, key=lambda x: scores[x[0]])
+        return tournament_winner[1]
 
 class MinMaxPlayer(Player):
-    def __init__(self, max_depth=4) -> None:
+    def __init__(self, player_id: int, max_depth=3) -> None:
         super().__init__()
         self.max_depth = max_depth
+        self.player_id = player_id
+        self.first_move_done = False
 
     def make_move(self, game: 'Game') -> tuple[tuple[int, int], Move]:
-        _, move = self.minmax_alpha_beta(game, 0, -float('inf'), float('inf'), True)
-        return move
+        if not self.first_move_done:
+            from_pos = (random.randint(0, 4), random.randint(0, 4))
+            move = random.choice([Move.TOP, Move.BOTTOM, Move.LEFT, Move.RIGHT])
+            self.first_move_done = True
+            game.print()
+            return from_pos, move
+        else:
+            _, move = self.minmax_alpha_beta(game, 0, float('-inf'), float('inf'), True)
+            game.print()
+            return move
 
     def minmax_alpha_beta(self, game, depth, alpha, beta, is_maximizing_player):
         winner = game.check_winner()
         if winner != -1 or depth == self.max_depth:
             return self.evaluate_game(game, winner), None
-
         depth += 1
         best_move = None
 
         if is_maximizing_player:
             max_eval = float('-inf')
-            for move in self.get_possible_moves(game, 0):
+            for move in self.get_possible_moves(game, self.player_id):
                 eval = self.evaluate_maximizing_player(game, move, depth, alpha, beta)
                 if eval > max_eval:
                     max_eval, best_move = eval, move
@@ -167,38 +145,36 @@ class MinMaxPlayer(Player):
                     break
         else:
             min_eval = float('inf')
-            for move in self.get_possible_moves(game, 1):
+            for move in self.get_possible_moves(game, 1 - self.player_id):
                 eval = self.evaluate_minimizing_player(game, move, depth, alpha, beta)
                 if eval < min_eval:
                     min_eval, best_move = eval, move
                 beta = min(beta, eval)
                 if alpha >= beta:
                     break
-
         return (max_eval if is_maximizing_player else min_eval), best_move
 
     def evaluate_game(self, game, winner):
-        if winner == 0:
-            return 1
-        elif winner == 1:
-            return -1
+        if winner == self.player_id:
+            return float('inf')
+        elif winner != -1:
+            return float('-inf')
         else:
-            num_zeros = np.count_nonzero(game._board == 0)
-            num_ones = np.count_nonzero(game._board == 1)
-            return (num_zeros - num_ones) / 100
+            num_self = np.count_nonzero(game.get_board() == self.player_id)
+            num_opponent = np.count_nonzero(game.get_board() == 1 - self.player_id)
+            return (num_self - num_opponent) / 100
 
     def evaluate_maximizing_player(self, game, move, depth, alpha, beta):
-        new_game = self.get_new_board(game, move, 0)
+        new_game = self.get_new_board(game, move, self.player_id)
         eval, _ = self.minmax_alpha_beta(new_game, depth, alpha, beta, False)
         return eval
 
     def evaluate_minimizing_player(self, game, move, depth, alpha, beta):
-        new_game = self.get_new_board(game, move, 1)
+        new_game = self.get_new_board(game, move, 1 - self.player_id)
         eval, _ = self.minmax_alpha_beta(new_game, depth, alpha, beta, True)
         return eval
 
     def get_new_board(self, game, possible_move, player):
-        # We do a deepcopy of the game object because in MinMax we change the game, not only the board attribute
         new_game = deepcopy(game)
         pos, move = possible_move
         if not new_game._Game__move(pos, move, player):
@@ -206,27 +182,33 @@ class MinMaxPlayer(Player):
             game.print()
         return new_game
 
-    def acceptable_move(self, pos, mov):
-        return not ((pos[1] == 0 and mov == Move.TOP)
-                    or (pos[1] == 4 and mov == Move.BOTTOM)
-                    or (pos[0] == 0 and mov == Move.LEFT)
-                    or (pos[0] == 4 and mov == Move.RIGHT))
-
     def get_possible_moves(self, game, player):
         possible_pos = [(i, j) for i in range(5) for j in range(5)
                         if (i in [0, 4] or j in [0, 4]) and (game._board[j, i] in [-1, player])]
-
         possible_moves = [(pos, mov) for pos in possible_pos for mov in [Move.TOP, Move.BOTTOM, Move.LEFT, Move.RIGHT]]
         return [(pos, mov) for pos, mov in possible_moves if self.acceptable_move(pos, mov)]
 
+    def acceptable_move(self, pos, mov):
+        return not ((pos[1] == 0 and mov == Move.TOP) or (pos[1] == 4 and mov == Move.BOTTOM)
+                    or (pos[0] == 0 and mov == Move.LEFT) or (pos[0] == 4 and mov == Move.RIGHT))
+
+
 if __name__ == '__main__':
-    g = Game()
-    g.print()
-    # Change the players based on your requirements
-    player1 = ESAgent(0)
-    player2 = RandomPlayer()
-
-    winner = g.play(player1, player2)
-    g.print()
-    print(f"Winner: Player {winner}")
-
+    Player1_w = 0
+    Player2_w = 0
+    Draw = 0
+    Num = 20
+    for i in range(Num):
+        g = Game()
+        player1 = MinMaxPlayer(0)
+        player2 = ESAgent(1)
+        print(f"Game {i}")
+        winner = g.play(player1, player2)
+        print(f"Winner: Player {winner}")
+        if winner == 0:
+            Player1_w += 1
+        elif winner == 1:
+            Player2_w += 1
+        else:
+            Draw += 1
+    print(f"Winrate: {player1.__class__.__name__} ={(Player1_w / Num)*100} % - {player2.__class__.__name__} = {(Player2_w / Num)*100}% - Draw = {(Draw / Num)*100}%")
